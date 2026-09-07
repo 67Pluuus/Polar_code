@@ -1,4 +1,4 @@
-"""Launch from the project root: python -B PoLar_code/run_stage_one.py ..."""
+"""Launch from the project root: python -B Polar_code/run_stage_one.py ..."""
 
 import sys
 

@@ -1,8 +1,8 @@
 # 第一阶段：生成 PoLar predictor 监督数据
 
-所有命令均在包含 `./PoLar_code` 的项目根目录执行，使用远程 Linux 的 Bash。
+所有命令均在包含 `./Polar_code` 的项目根目录执行，使用远程 Linux 的 Bash。
 本次交付只做静态检查，没有下载或执行模型，没有生成真实搜索结果。
-原仓库文件保持不变；新增代码全部位于 `./PoLar_code`，运行产物全部位于 `./Polar_data`。
+原仓库文件保持不变；新增代码全部位于 `./Polar_code`，运行产物全部位于 `./Polar_data`。
 
 ## 1. 准备模型和数据
 
@@ -11,7 +11,7 @@
 | 示例基础模型，完整未量化权重及 tokenizer/config/generation_config | [meta-llama/Llama-3.2-3B-Instruct](https://huggingface.co/meta-llama/Llama-3.2-3B-Instruct)，需要取得访问权限 | `./Polar_data/models/meta-llama/Llama-3.2-3B-Instruct/` |
 | DART-Math 原始池的全部 5 个 parquet 分片 | [hkust-nlp/dart-math-pool-math](https://huggingface.co/datasets/hkust-nlp/dart-math-pool-math/tree/main/data)，`data/train-00000-of-00005.parquet` 至 `data/train-00004-of-00005.parquet` | `./Polar_data/raw/dart-math-pool-math/data/` |
 | predictor 的冻结 embedding 模型，仅训练 predictor 时需要 | [Qwen/Qwen3-Embedding-0.6B](https://huggingface.co/Qwen/Qwen3-Embedding-0.6B)，完整 Hugging Face 缓存布局，包含 `refs/main` 与对应 snapshot | `./Polar_data/cache/huggingface/hub/models--Qwen--Qwen3-Embedding-0.6B/` |
-| Python 环境 | Linux Python 3.10/3.11，原 `./PoLar_code/requirements.txt` 的固定版本，另外需要 PyPI 的 `pyarrow==20.0.0`；统一清单为 `./PoLar_code/stage_one/requirements.txt` | 建议环境放在 `./Polar_data/environment/` |
+| Python 环境 | Linux Python 3.10/3.11，原 `./Polar_code/requirements.txt` 的固定版本，另外需要 PyPI 的 `pyarrow==20.0.0`；统一清单为 `./Polar_code/stage_one/requirements.txt` | 建议环境放在 `./Polar_data/environment/` |
 
 原始池约 965 MB 压缩数据。程序不会联网下载缺失资源。准备时记录实际模型/数据 revision；下方 `local-snapshot`、`local-files` 表示本地快照来源标签，不冒充 Hugging Face commit，程序还会计算实际文件 SHA-256。
 
@@ -38,7 +38,7 @@ nvidia-smi
 离线检查依赖导入、本地模型文件完整性和数据分片，不加载模型、不执行 GPU：
 
 ```bash
-python -B ./PoLar_code/run_stage_one.py environment --run-name mcts_formal --model-path ./Polar_data/models/meta-llama/Llama-3.2-3B-Instruct --data-path ./Polar_data/raw/dart-math-pool-math
+python -B ./Polar_code/run_stage_one.py environment --run-name mcts_formal --model-path ./Polar_data/models/meta-llama/Llama-3.2-3B-Instruct --data-path ./Polar_data/raw/dart-math-pool-math
 ```
 
 输出：`./Polar_data/runs/mcts_formal/environment/report.json`。脚本不安装任何依赖。该检查不证明 GPU 显存够用，实际执行兼容性由下一步检查。
@@ -48,7 +48,7 @@ python -B ./PoLar_code/run_stage_one.py environment --run-name mcts_formal --mod
 只选难度 1 的 8 道唯一题，按 5/1/2 划分；模型、1,024 次搜索预算、生成参数与正式配置相同。测试题只执行基线路径。
 
 ```bash
-bash ./PoLar_code/run_stage_one_pipeline.sh --nproc_per_node=1 --run-name mcts_smoke --data-path ./Polar_data/raw/dart-math-pool-math --source-revision local-files --model-id meta-llama/Llama-3.2-3B-Instruct --model-path ./Polar_data/models/meta-llama/Llama-3.2-3B-Instruct --model-revision local-snapshot --max-questions-per-diff 8 --difficulties "1" --train-predictor false --predictor-config ./PoLar_code/stage_one/predictor_config.json
+bash ./Polar_code/run_stage_one_pipeline.sh --nproc_per_node=1 --run-name mcts_smoke --data-path ./Polar_data/raw/dart-math-pool-math --source-revision local-files --model-id meta-llama/Llama-3.2-3B-Instruct --model-path ./Polar_data/models/meta-llama/Llama-3.2-3B-Instruct --model-revision local-snapshot --max-questions-per-diff 8 --difficulties "1" --train-predictor false --predictor-config ./Polar_code/stage_one/predictor_config.json
 ```
 
 输出：`./Polar_data/runs/mcts_smoke/{environment,prepared,search,merged,validation}/`。此步骤**真实执行基础模型**，请只在服务器运行；1,024 次预算不会因为叫“小规模”而缩减。先看 `merged/summary.md` 和 `validation/report.json`。没有找到有效路径不等于程序执行失败；不保证每题都能搜到正例。
@@ -58,14 +58,14 @@ bash ./PoLar_code/run_stage_one_pipeline.sh --nproc_per_node=1 --run-name mcts_s
 先准备全部唯一题；训练与验证集独立搜索，验证路径只用于验证损失，测试集不做 MCTS。
 
 ```bash
-python -B ./PoLar_code/run_stage_one.py prepare --run-name mcts_formal --data-path ./Polar_data/raw/dart-math-pool-math --data-source hkust-nlp/dart-math-pool-math --source-revision local-files --difficulties 1 2 3 4 5 --seed 42 --split-policy proportional --train-fraction 0.625 --validation-fraction 0.125 --max-questions-per-diff 0
+python -B ./Polar_code/run_stage_one.py prepare --run-name mcts_formal --data-path ./Polar_data/raw/dart-math-pool-math --data-source hkust-nlp/dart-math-pool-math --source-revision local-files --difficulties 1 2 3 4 5 --seed 42 --split-policy proportional --train-fraction 0.625 --validation-fraction 0.125 --max-questions-per-diff 0
 ```
 
 输出：`./Polar_data/runs/mcts_formal/prepared/manifest.json` 和 `summary.json`。`0` 明确表示不限制题数。
 
 ```bash
 mkdir -p ./Polar_data/runtime/launcher
-TMPDIR=./Polar_data/runtime/launcher PYTHONDONTWRITEBYTECODE=1 torchrun --standalone --nproc_per_node=1 ./PoLar_code/run_stage_one.py search --run-name mcts_formal --model-id meta-llama/Llama-3.2-3B-Instruct --model-path ./Polar_data/models/meta-llama/Llama-3.2-3B-Instruct --model-revision local-snapshot --seed 42 --simulations 1024 --exploration 1.4142135623730951 --length-penalty 0.1 --max-block 4 --max-repeats 4 --max-length-factor 1.15 --max-new-tokens 50 --temperature 0 --completion-timeout 604800
+TMPDIR=./Polar_data/runtime/launcher PYTHONDONTWRITEBYTECODE=1 torchrun --standalone --nproc_per_node=1 ./Polar_code/run_stage_one.py search --run-name mcts_formal --model-id meta-llama/Llama-3.2-3B-Instruct --model-path ./Polar_data/models/meta-llama/Llama-3.2-3B-Instruct --model-revision local-snapshot --seed 42 --simulations 1024 --exploration 1.4142135623730951 --length-penalty 0.1 --max-block 4 --max-repeats 4 --max-length-factor 1.15 --max-new-tokens 50 --temperature 0 --completion-timeout 604800
 ```
 
 输出：`./Polar_data/runs/mcts_formal/search/`，结束后 rank 0 自动合并到 `merged/` 并验证到 `validation/`。
@@ -76,7 +76,7 @@ TMPDIR=./Polar_data/runtime/launcher PYTHONDONTWRITEBYTECODE=1 torchrun --standa
 
 ```bash
 mkdir -p ./Polar_data/runtime/launcher
-TMPDIR=./Polar_data/runtime/launcher PYTHONDONTWRITEBYTECODE=1 torchrun --standalone --nproc_per_node=8 ./PoLar_code/run_stage_one.py search --run-name mcts_formal --model-id meta-llama/Llama-3.2-3B-Instruct --model-path ./Polar_data/models/meta-llama/Llama-3.2-3B-Instruct --model-revision local-snapshot --seed 42 --simulations 1024 --exploration 1.4142135623730951 --length-penalty 0.1 --max-block 4 --max-repeats 4 --max-length-factor 1.15 --max-new-tokens 50 --temperature 0 --completion-timeout 604800
+TMPDIR=./Polar_data/runtime/launcher PYTHONDONTWRITEBYTECODE=1 torchrun --standalone --nproc_per_node=8 ./Polar_code/run_stage_one.py search --run-name mcts_formal --model-id meta-llama/Llama-3.2-3B-Instruct --model-path ./Polar_data/models/meta-llama/Llama-3.2-3B-Instruct --model-revision local-snapshot --seed 42 --simulations 1024 --exploration 1.4142135623730951 --length-penalty 0.1 --max-block 4 --max-repeats 4 --max-length-factor 1.15 --max-new-tokens 50 --temperature 0 --completion-timeout 604800
 ```
 
 输出同上，逐 rank 数据在 `search/rank_00000/` 至 `search/rank_00007/`。`global_index % world_size` 分片，逐题随机种子不依赖 rank；不使用 DDP。rank 0 等到本次运行的全部完成标识才合并。没有搜索结束 barrier；异常由 torchrun 终止其他进程，缺失完成标识另有显式超时。
@@ -86,7 +86,7 @@ TMPDIR=./Polar_data/runtime/launcher PYTHONDONTWRITEBYTECODE=1 torchrun --standa
 适用于搜索完成后单独重做合并；如果异常发生时所有逐题文件已经完整，也可以直接使用它。缺题或执行失败会拒绝合并，必须先恢复搜索。
 
 ```bash
-python -B ./PoLar_code/run_stage_one.py merge --run-name mcts_formal
+python -B ./Polar_code/run_stage_one.py merge --run-name mcts_formal
 ```
 
 输出：`./Polar_data/runs/mcts_formal/merged/meta-llama/Llama-3.2-3B-Instruct/dart-math-diff-{1..5}/merged_mcts_samples.json`，以及 `merged/summary.json`、`merged/summary.md`。
@@ -94,7 +94,7 @@ python -B ./PoLar_code/run_stage_one.py merge --run-name mcts_formal
 ## 7. 验证数据
 
 ```bash
-python -B ./PoLar_code/run_stage_one.py validate --run-name mcts_formal
+python -B ./Polar_code/run_stage_one.py validate --run-name mcts_formal
 ```
 
 输出：`./Polar_data/runs/mcts_formal/validation/report.json`。检查严格 JSON、必需字段、重复 ID/题文/来源 ID、划分顺序、合法非空层路径、valid/invalid 互斥、逐题校验和、完整分片和最终文件与分片一致性；实际实例化官方 **CPU 数据加载器**并核对训练路径数，不加载模型。不同文字改写的语义重复不在这一自动检查的保证范围内。
@@ -102,7 +102,7 @@ python -B ./PoLar_code/run_stage_one.py validate --run-name mcts_formal
 ## 8. 对接官方 predictor 训练
 
 ```bash
-python -B ./PoLar_code/train_stage_one_predictor.py --run-name mcts_formal --predictor-config ./PoLar_code/stage_one/predictor_config.json
+python -B ./Polar_code/train_stage_one_predictor.py --run-name mcts_formal --predictor-config ./Polar_code/stage_one/predictor_config.json
 ```
 
 输出：`./Polar_data/runs/mcts_formal/predictor/`。JSON 配置显式列出官方全部 52 个参数，当前选择 README 的 10 epochs、batch 128、LR 5e-4、最多 50 条路径、原路径权重 0.30、cosine 和 warmup 10；训练全部五个难度。没有有效训练或验证标签的难度会停止。更换 run-name 时同步修改配置中的 `data_root`、`save_dir`，更换模型时同步修改 `model_path`。已有完成且校验和一致的 checkpoint 自动跳过；原训练函数没有 optimizer 断点机制，训练中断需显式 `--clean` 从头训练，不能把它称为训练断点续训。
@@ -146,7 +146,7 @@ python -B ./PoLar_code/train_stage_one_predictor.py --run-name mcts_formal --pre
 静态复查命令：
 
 ```bash
-python -B ./PoLar_code/check_stage_one_static.py --run-name static_review
+python -B ./Polar_code/check_stage_one_static.py --run-name static_review
 ```
 
 输出：`./Polar_data/runs/static_review/environment/static_report.json`。它只做 AST、相对导入和参数配置检查，不执行训练、推理或搜索。
@@ -154,5 +154,5 @@ python -B ./PoLar_code/check_stage_one_static.py --run-name static_review
 一键全部运行（包含 predictor 训练；先完成资源准备并通过小规模检查；将 `--nproc_per_node=8` 改成 `1` 即为同配置单卡正式运行）：
 
 ```bash
-bash ./PoLar_code/run_stage_one_pipeline.sh --nproc_per_node=8 --run-name mcts_formal --data-path ./Polar_data/raw/dart-math-pool-math --source-revision local-files --model-id meta-llama/Llama-3.2-3B-Instruct --model-path ./Polar_data/models/meta-llama/Llama-3.2-3B-Instruct --model-revision local-snapshot --max-questions-per-diff 0 --difficulties "1 2 3 4 5" --train-predictor true --predictor-config ./PoLar_code/stage_one/predictor_config.json
+bash ./Polar_code/run_stage_one_pipeline.sh --nproc_per_node=8 --run-name mcts_formal --data-path ./Polar_data/raw/dart-math-pool-math --source-revision local-files --model-id meta-llama/Llama-3.2-3B-Instruct --model-path ./Polar_data/models/meta-llama/Llama-3.2-3B-Instruct --model-revision local-snapshot --max-questions-per-diff 0 --difficulties "1 2 3 4 5" --train-predictor true --predictor-config ./Polar_code/stage_one/predictor_config.json
 ```

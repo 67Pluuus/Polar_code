@@ -20,7 +20,7 @@ def main():
     if args.clean:
         clean_stage(args.run_name, "environment")
     recover_pending(folder)
-    repository = Path("PoLar_code")
+    repository = Path("Polar_code")
     added = sorted((repository / "stage_one").glob("*.py")) + [repository / name for name in (
         "run_stage_one.py", "train_stage_one_predictor.py", "check_stage_one_static.py")]
     report = {"check_type": "static AST and configuration only", "model_executed": False,

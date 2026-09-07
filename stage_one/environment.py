@@ -15,7 +15,7 @@ def check_environment(args):
         clean_stage(args.run_name, "environment")
     recover_pending(folder)
     problems, versions = [], {}
-    requirements = Path("PoLar_code/requirements.txt").read_text(encoding="utf-8").splitlines()
+    requirements = Path("Polar_code/requirements.txt").read_text(encoding="utf-8").splitlines()
     for spec in requirements:
         if "==" not in spec:
             continue

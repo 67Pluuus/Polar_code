@@ -51,8 +51,8 @@ def parser():
 
 
 def validate_args(args):
-    if not Path("PoLar_code/polar/data.py").is_file():
-        raise ValueError("Run from the project root containing ./PoLar_code and ./Polar_data")
+    if not Path("Polar_code/polar/data.py").is_file():
+        raise ValueError("Run from the project root containing ./Polar_code and ./Polar_data")
     stage_dir(args.run_name, {"prepare": "prepared", "merge": "merged",
                               "validate": "validation"}.get(args.stage, args.stage))
     for key in ("data_path", "model_path"):

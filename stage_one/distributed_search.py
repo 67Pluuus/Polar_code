@@ -36,7 +36,7 @@ def build_config(args, manifest, world):
     if local_config.get("num_hidden_layers") != depth:
         raise ValueError("Local model config does not match model-id depth")
     # Hash weight/config/tokenizer bytes without deserializing any tensors.
-    source_files = sorted(Path("PoLar_code").rglob("*.py"))
+    source_files = sorted(Path("Polar_code").rglob("*.py"))
     config = {"schema_version": 1, "args": options, "world_size": world,
               "depth": depth, "max_length": int(depth * args.max_length_factor),
               "manifest_id": manifest["manifest_id"],
