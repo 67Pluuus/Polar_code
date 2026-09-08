@@ -12,7 +12,7 @@ from tqdm import tqdm
 
 from .model_runner import ModelRunner, model_inventory
 from .storage import (atomic_json, clean_stage, digest, file_digest, output_path,
-                      read_json, recover_pending, run_lock, stage_dir)
+                      read_json, recover_pending, relative_path, run_lock, stage_dir)
 from .validate import load_search
 
 
@@ -32,11 +32,15 @@ def build_config(args, manifest, search_config, candidates, world_size):
             candidates["run_name"] != args.run_name):
         raise ValueError("Candidate set source manifest, depth, or run does not match")
     expected = search_config["args"]
-    comparable = ("model_id", "model_path", "model_revision", "seed",
+    comparable = ("model_id", "model_revision", "seed",
                   "max_new_tokens", "temperature")
     for key in comparable:
-        if getattr(args, key) != expected[key]:
-            raise ValueError(f"Universal evaluation {key} must match the MCTS search")
+        actual_value = getattr(args, key)
+        expected_value = expected[key]
+        if actual_value != expected_value:
+            raise ValueError(
+                f"Universal evaluation {key} must match the MCTS search: "
+                f"got {actual_value!r}, expected {expected_value!r}")
     inventory = model_inventory(args.model_path)
     if inventory != search_config["model_files"]:
         raise ValueError("Local model bytes differ from the MCTS search")
@@ -74,6 +78,8 @@ def build_config(args, manifest, search_config, candidates, world_size):
         raise ValueError("Every requested difficulty needs validation and test questions")
     options = {key: getattr(args, key) for key in
                (*comparable, "evaluation_splits", "max_eval_candidates")}
+    options["model_path"] = str(relative_path(args.model_path))
+    options["search_model_path"] = str(relative_path(expected["model_path"]))
     config = {
         "schema_version": 1,
         "args": options,
