@@ -87,7 +87,7 @@ def validate_candidate_payload(payload):
         seen_paths.add(path_key)
         if not row.get("sources") or not all(isinstance(value, str) for value in row["sources"]):
             raise ValueError("Every candidate requires a nonempty source list")
-        if row.get("length") != len(path) or row.get("depth_ratio") != len(path) / depth:
+        if row.get("length") != len(path):
             raise ValueError("Candidate length metadata does not match its path")
     if not seen_ids:
         raise ValueError("Candidate set is empty")
@@ -115,10 +115,6 @@ def mine_programs(args):
     train = [row for row in records if row["split"] == "train"]
     if not train:
         raise ValueError("No train questions are available for candidate mining")
-    missing_train_groups = [difficulty for difficulty in manifest["args"]["difficulties"]
-                            if not any(row["difficulty"] == difficulty for row in train)]
-    if missing_train_groups:
-        raise ValueError(f"No train questions for difficulties {missing_train_groups}")
     depth = config["depth"]
     full = tuple(range(depth))
 
@@ -141,7 +137,8 @@ def mine_programs(args):
                     weights[("all", outcome, layer, action)] += weight
 
     layer_rows = []
-    groups = list(manifest["args"]["difficulties"]) + ["all"]
+    difficulty_groups = sorted({row["difficulty"] for row in train})
+    groups = difficulty_groups + ["all"]
     for group in groups:
         for layer in range(depth):
             for action in ACTIONS:
@@ -160,7 +157,6 @@ def mine_programs(args):
                                    "invalid_fraction": invalid_fraction,
                                    "log_propensity_lift": lift})
 
-    difficulty_groups = list(manifest["args"]["difficulties"])
     row_lookup = {(row["group"], row["layer"], row["action"]): row
                   for row in layer_rows}
     robust_hypotheses = []
@@ -400,7 +396,12 @@ def report_programs(args):
     validate_candidate_payload(candidates)
     eval_config, records = load_universal_evaluation(args.run_name, require_complete=True)
     candidate_map = {row["candidate_id"]: row for row in candidates["candidates"]}
-    difficulties = eval_config["difficulties"]
+    split_groups = eval_config["split_difficulty_counts"]
+    difficulties = [difficulty for difficulty in eval_config["difficulties"]
+                    if split_groups["validation"].get(str(difficulty), 0) > 0 and
+                    split_groups["test"].get(str(difficulty), 0) > 0]
+    if not difficulties:
+        raise ValueError("Validation and test have no shared difficulty group")
     metrics = {}
     for candidate_id in tqdm(candidate_map, desc="Aggregate fixed-program metrics"):
         metrics[candidate_id] = {

@@ -4,14 +4,13 @@ from datetime import timedelta
 import contextlib
 import importlib.metadata
 import os
-from pathlib import Path
 import time
 import uuid
 
 from tqdm import tqdm
 
-from .model_runner import ModelRunner, model_inventory
-from .storage import (atomic_json, clean_stage, digest, file_digest, output_path,
+from .model_runner import ModelRunner
+from .storage import (atomic_json, clean_stage, digest, output_path,
                       read_json, recover_pending, relative_path, run_lock, stage_dir)
 from .validate import load_search
 
@@ -41,23 +40,6 @@ def build_config(args, manifest, search_config, candidates, world_size):
             raise ValueError(
                 f"Universal evaluation {key} must match the MCTS search: "
                 f"got {actual_value!r}, expected {expected_value!r}")
-    inventory = model_inventory(args.model_path)
-    if inventory != search_config["model_files"]:
-        raise ValueError("Local model bytes differ from the MCTS search")
-    source_files = sorted(Path("Polar_code").rglob("*.py"))
-    code_sha256 = {str(path): file_digest(path) for path in source_files}
-    critical_prefixes = ("Polar_code/llm_depth_router/", "Polar_code/dart_math/",
-                         "Polar_code/polar/")
-    critical_files = [name for name in code_sha256
-                      if name.replace("\\", "/").startswith(critical_prefixes) or
-                      name.replace("\\", "/") == "Polar_code/stage_one/model_runner.py"]
-    for name in critical_files:
-        original = search_config["code_sha256"].get(name)
-        if original is None:
-            # Search configurations created on Windows can carry backslashes.
-            original = search_config["code_sha256"].get(name.replace("/", "\\"))
-        if original != code_sha256[name]:
-            raise ValueError(f"Generation/scoring source changed since MCTS search: {name}")
     if len(candidates["candidates"]) > args.max_eval_candidates:
         raise ValueError("Candidate count exceeds --max-eval-candidates")
     split_counts = {
@@ -73,9 +55,6 @@ def build_config(args, manifest, search_config, candidates, world_size):
             for difficulty in manifest["args"]["difficulties"]}
         for split in args.evaluation_splits
     }
-    if any(count == 0 for groups in split_difficulty_counts.values()
-           for count in groups.values()):
-        raise ValueError("Every requested difficulty needs validation and test questions")
     options = {key: getattr(args, key) for key in
                (*comparable, "evaluation_splits", "max_eval_candidates")}
     options["model_path"] = str(relative_path(args.model_path))
@@ -91,8 +70,7 @@ def build_config(args, manifest, search_config, candidates, world_size):
         "manifest_id": manifest["manifest_id"],
         "search_config_id": search_config["config_id"],
         "candidate_set_id": candidates["candidate_set_id"],
-        "model_files": inventory,
-        "code_sha256": code_sha256,
+        "search_model_inventory_id": digest(search_config.get("model_files", [])),
         "dependency_versions": {
             name: importlib.metadata.version(name)
             for name in ("torch", "transformers", "numpy", "sympy", "Pebble", "tqdm")

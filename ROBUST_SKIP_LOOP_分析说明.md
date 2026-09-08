@@ -46,7 +46,7 @@ mkdir -p ./Polar_data/runtime/launcher
 TMPDIR=./Polar_data/runtime/launcher PYTHONDONTWRITEBYTECODE=1 HF_HUB_OFFLINE=1 HF_DATASETS_OFFLINE=1 torchrun --standalone --nproc_per_node=1 ./Polar_code/run_stage_one.py evaluate-programs --run-name mcts_smoke --model-id meta-llama/Llama-3.2-3B-Instruct --model-path ./Polar_data/models/meta-llama/Llama-3.2-3B-Instruct --model-revision local-snapshot --seed 42 --max-new-tokens 50 --temperature 0 --evaluation-splits validation test --max-eval-candidates 12 --completion-timeout 604800 --clean
 ```
 
-输出：`./Polar_data/runs/mcts_smoke/universal_eval/`。模型、revision、seed 和生成参数必须与原 MCTS search 完全一致。
+输出：`./Polar_data/runs/mcts_smoke/universal_eval/`。模型 ID、revision、seed 和生成参数必须与原 MCTS search 一致；模型目录可以移动，但应由用户保证仍是同一份权重。
 
 生成 smoke 报告：
 
@@ -106,7 +106,7 @@ python -B ./Polar_code/run_stage_one.py report-programs --run-name mcts_formal -
 - `selected_program_layers.svg/pdf`：最终固定路径逐层 S/K/L 结构；
 - `FIGURE_CAPTIONS.md`：图注和数据边界。
 
-若要清理，只有显式加入 `--clean` 才会删除本阶段旧产物，且范围严格限制在对应的 `./Polar_data/runs/<run-name>/` 子目录。候选集、模型文件、代码或 world size 变化时，恢复校验会拒绝混用旧分片。
+若要清理，只有显式加入 `--clean` 才会删除本阶段旧产物，且范围严格限制在对应的 `./Polar_data/runs/<run-name>/` 子目录。候选集、评测参数或 world size 变化时，恢复校验会拒绝混用旧分片。
 
 ## 7. 与 predictor 的关系
 
