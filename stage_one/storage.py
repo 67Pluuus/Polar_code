@@ -37,7 +37,8 @@ def stage_dir(run, stage):
     if not re.fullmatch(r"[a-zA-Z0-9][a-zA-Z0-9_-]*", run):
         raise ValueError("run-name must contain only letters, digits, _ or -")
     if stage not in {"environment", "prepared", "search", "merged", "validation", "predictor",
-                     "program_mining", "universal_eval", "program_report"}:
+                     "program_mining", "universal_eval", "program_report",
+                     "representations", "representation_report"}:
         raise ValueError(f"Unknown stage: {stage}")
     return output_path(ROOT / "runs" / run / stage)
 

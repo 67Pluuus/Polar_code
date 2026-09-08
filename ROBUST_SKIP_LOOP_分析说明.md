@@ -1,5 +1,8 @@
 # 跨任务通用 Skip-Loop 结构分析
 
+MCTS 评估顺序和 residual stream 的 mNN/CKA/PCA 可视化见
+[`REPRESENTATION_可视化说明.md`](./REPRESENTATION_可视化说明.md)。
+
 所有命令都在同时包含 `./Polar_code` 和 `./Polar_data` 的项目根目录执行。本流程不会改动 predictor；它回答的是“同一条固定层路径能否跨 DART-Math 难度迁移”。这里把 DM-1 至 DM-5 作为五个任务组。
 
 先完成五个难度的 MCTS 搜索、合并和验证。10 题 smoke run 只能检查程序能否跑通：它只有 6 道 train、1 道 validation、3 道 test，且只有 DM-1，不能支持“跨任务鲁棒”的结论。
@@ -46,7 +49,7 @@ mkdir -p ./Polar_data/runtime/launcher
 TMPDIR=./Polar_data/runtime/launcher PYTHONDONTWRITEBYTECODE=1 HF_HUB_OFFLINE=1 HF_DATASETS_OFFLINE=1 torchrun --standalone --nproc_per_node=1 ./Polar_code/run_stage_one.py evaluate-programs --run-name mcts_smoke --model-id meta-llama/Llama-3.2-3B-Instruct --model-path ./Polar_data/models/meta-llama/Llama-3.2-3B-Instruct --model-revision local-snapshot --seed 42 --max-new-tokens 50 --temperature 0 --evaluation-splits validation test --max-eval-candidates 12 --completion-timeout 604800 --clean
 ```
 
-输出：`./Polar_data/runs/mcts_smoke/universal_eval/`。模型 ID、revision、seed 和生成参数必须与原 MCTS search 一致；模型目录可以移动，但应由用户保证仍是同一份权重。
+输出：`./Polar_data/runs/mcts_smoke/universal_eval/`。模型 ID、seed 和生成参数必须与原 MCTS search 一致；模型目录与 revision 标签可以变化，但应由用户保证仍是同一份权重。
 
 生成 smoke 报告：
 

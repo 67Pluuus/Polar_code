@@ -16,11 +16,12 @@ def parser():
     result = argparse.ArgumentParser(description="Offline PoLar MCTS supervision stages")
     commands = result.add_subparsers(dest="stage", required=True)
     for name in ("environment", "prepare", "search", "merge", "validate",
-                 "mine-programs", "evaluate-programs", "report-programs"):
+                 "mine-programs", "evaluate-programs", "report-programs",
+                 "capture-representations", "report-representations"):
         sub = commands.add_parser(name)
         sub.add_argument("--run-name", required=True)
         sub.add_argument("--clean", action="store_true", help="Explicitly clear ONLY this stage's run directory")
-        if name not in {"search", "evaluate-programs"}:
+        if name not in {"search", "evaluate-programs", "capture-representations"}:
             sub.add_argument("--clean-only", action="store_true", help="With --clean, clear this stage then exit")
         if name in {"environment", "prepare"}:
             sub.add_argument("--data-path", required=True)
@@ -68,6 +69,25 @@ def parser():
         if name == "report-programs":
             sub.add_argument("--bootstrap-samples", type=int, required=True)
             sub.add_argument("--bootstrap-seed", type=int, required=True)
+        if name == "capture-representations":
+            sub.add_argument("--model-id", required=True, choices=MODELS)
+            sub.add_argument("--model-path", required=True)
+            sub.add_argument("--model-revision", required=True)
+            sub.add_argument("--seed", type=int, required=True)
+            sub.add_argument("--representation-splits", nargs="+", required=True,
+                             choices=["validation", "test"])
+            sub.add_argument("--max-representation-questions", type=int, required=True,
+                             help="0 captures every available held-out question")
+            sub.add_argument("--max-programs", type=int, required=True)
+            sub.add_argument("--pooling", required=True, choices=["last-token", "mean"])
+            sub.add_argument("--completion-timeout", type=int, required=True)
+        if name == "report-representations":
+            sub.add_argument("--neighbor-k", type=int, required=True)
+            sub.add_argument("--alignment-samples", type=int, required=True)
+            sub.add_argument("--projection-samples", type=int, required=True)
+            sub.add_argument("--max-search-questions", type=int, required=True)
+            sub.add_argument("--max-paths-per-question", type=int, required=True)
+            sub.add_argument("--seed", type=int, required=True)
     return result
 
 
@@ -76,7 +96,9 @@ def validate_args(args):
         raise ValueError("Run from the project root containing ./Polar_code and ./Polar_data")
     stage_map = {"prepare": "prepared", "merge": "merged", "validate": "validation",
                  "mine-programs": "program_mining", "evaluate-programs": "universal_eval",
-                 "report-programs": "program_report"}
+                 "report-programs": "program_report",
+                 "capture-representations": "representations",
+                 "report-representations": "representation_report"}
     stage_dir(args.run_name, stage_map.get(args.stage, args.stage))
     for key in ("data_path", "model_path"):
         if hasattr(args, key):
@@ -111,6 +133,15 @@ def validate_args(args):
             raise ValueError("Evaluation temperature must be finite and nonnegative")
     if args.stage == "report-programs" and args.bootstrap_samples <= 0:
         raise ValueError("Bootstrap sample count must be positive")
+    if args.stage == "capture-representations":
+        if args.max_representation_questions < 0 or min(
+                args.max_programs, args.completion_timeout) <= 0:
+            raise ValueError("Invalid representation capture limits")
+        args.representation_splits = sorted(set(args.representation_splits))
+    if args.stage == "report-representations":
+        if min(args.neighbor_k, args.alignment_samples, args.projection_samples,
+               args.max_search_questions, args.max_paths_per_question) <= 0:
+            raise ValueError("Representation report limits must be positive")
 
 
 def main():
@@ -118,7 +149,11 @@ def main():
     validate_args(args)
     from .environment import configure_runtime
     configure_runtime(args.run_name)
-    if args.stage in {"search", "evaluate-programs"}:
+    if args.stage in {"search", "evaluate-programs", "capture-representations"}:
+        if args.stage == "capture-representations":
+            from .representation_analysis import distributed_capture_representations
+            distributed_capture_representations(args)
+            return
         if args.stage == "evaluate-programs":
             from .universal_eval import distributed_evaluate_programs
             distributed_evaluate_programs(args)
@@ -127,7 +162,7 @@ def main():
         distributed_search(args)
         return
     if int(os.environ.get("WORLD_SIZE", "1")) != 1:
-        raise ValueError("Only search/evaluate-programs accept multi-rank torchrun")
+        raise ValueError("Only model-execution stages accept multi-rank torchrun")
     with run_lock(args.run_name):
         if args.clean_only:
             if not args.clean:
@@ -135,7 +170,9 @@ def main():
             from .storage import clean_stage
             clean_stage(args.run_name, {"prepare": "prepared", "merge": "merged",
                                        "validate": "validation", "mine-programs": "program_mining",
-                                       "report-programs": "program_report"}.get(args.stage, args.stage))
+                                       "report-programs": "program_report",
+                                       "report-representations": "representation_report"}.get(
+                                           args.stage, args.stage))
             return
         if args.stage == "environment":
             from .environment import check_environment
@@ -155,3 +192,6 @@ def main():
         elif args.stage == "report-programs":
             from .program_analysis import report_programs
             report_programs(args)
+        elif args.stage == "report-representations":
+            from .representation_analysis import report_representations
+            report_representations(args)

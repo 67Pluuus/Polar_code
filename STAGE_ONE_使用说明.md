@@ -2,6 +2,8 @@
 
 跨难度固定 skip-loop 结构的 train-only 挖掘、held-out 评测和图表见
 [`ROBUST_SKIP_LOOP_分析说明.md`](./ROBUST_SKIP_LOOP_分析说明.md)。
+MCTS 探索路径和 residual stream 的 mNN/CKA/PCA 分析见
+[`REPRESENTATION_可视化说明.md`](./REPRESENTATION_可视化说明.md)。
 
 所有命令均在包含 `./Polar_code` 的项目根目录执行，使用远程 Linux 的 Bash。
 本次交付只做静态检查，没有下载或执行模型，没有生成真实搜索结果。

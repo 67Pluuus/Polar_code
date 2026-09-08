@@ -31,8 +31,17 @@ def build_config(args, manifest, search_config, candidates, world_size):
             candidates["run_name"] != args.run_name):
         raise ValueError("Candidate set source manifest, depth, or run does not match")
     expected = search_config["args"]
-    comparable = ("model_id", "model_revision", "seed",
-                  "max_new_tokens", "temperature")
+    requested_model_path = relative_path(args.model_path)
+    search_model_path = relative_path(expected["model_path"])
+    if not (requested_model_path / "config.json").is_file():
+        if (search_model_path / "config.json").is_file():
+            print(f"Model path {requested_model_path} is unavailable; using search path {search_model_path}")
+            args.model_path = str(search_model_path)
+        else:
+            raise ValueError(
+                f"No local config.json at {requested_model_path} or recorded search path "
+                f"{search_model_path}")
+    comparable = ("model_id", "seed", "max_new_tokens", "temperature")
     for key in comparable:
         actual_value = getattr(args, key)
         expected_value = expected[key]
@@ -59,6 +68,8 @@ def build_config(args, manifest, search_config, candidates, world_size):
                (*comparable, "evaluation_splits", "max_eval_candidates")}
     options["model_path"] = str(relative_path(args.model_path))
     options["search_model_path"] = str(relative_path(expected["model_path"]))
+    options["model_revision"] = args.model_revision
+    options["search_model_revision"] = expected["model_revision"]
     config = {
         "schema_version": 1,
         "args": options,

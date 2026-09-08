@@ -85,13 +85,14 @@ class ModelRunner:
     def __init__(self, args, local_rank, log_stream):
         import torch
         from llm_depth_router.model import get_model, get_tokenizer
-        from polar.eval import _online_eval_math_single
+        import polar.eval as polar_eval
 
         torch.cuda.set_device(local_rank)
         self.model = get_model(args.model_path, device=f"cuda:{local_rank}")
         self.tokenizer = get_tokenizer(args.model_path)
         self.hook = install_execution_cache(self.model)
-        self.evaluate = _online_eval_math_single
+        self.evaluate = polar_eval._online_eval_math_single
+        self.polar_eval = polar_eval
         self.args = args
         self.log_stream = log_stream
         self.depth = int(self.model.config.num_hidden_layers)
@@ -123,3 +124,68 @@ class ModelRunner:
                                  question=row["question"], gt=row["gt_ans"],
                                  max_new_tokens=self.args.max_new_tokens,
                                  temperature=self.args.temperature)
+
+    def residual_stream(self, row, path, pooling):
+        """Return post-block prefill residuals in execution-slot order."""
+        import torch
+        from llm_depth_router.model import setup_custom_path
+
+        prompt = (
+            "Solve the following math problem and output ONLY the final answer directly, "
+            "formatted strictly as \\boxed{ANSWER}.\n"
+            "### Problem Start\n"
+            f"{row['question']}\n"
+            "### Problem End\n"
+            "Answer:"
+        )
+        helper = self.polar_eval
+        if helper._is_qwen3_model_path(self.args.model_path):
+            text = helper._qwen3_apply_chat_template(self.tokenizer, prompt)
+            inputs = self.tokenizer([text], return_tensors="pt").to(self.model.device)
+        elif helper._is_qwen15_moe_chat_model_path(self.args.model_path):
+            text = helper._qwen15_moe_apply_chat_template(self.tokenizer, prompt)
+            inputs = self.tokenizer([text], return_tensors="pt").to(self.model.device)
+        elif helper._is_qwen25_instruct_model_path(self.args.model_path):
+            text = helper._qwen25_apply_chat_template(self.tokenizer, prompt)
+            inputs = self.tokenizer([text], return_tensors="pt").to(self.model.device)
+        else:
+            inputs = self.tokenizer(prompt, return_tensors="pt").to(self.model.device)
+
+        setup_custom_path(self.model, path)
+        captured = []
+        mask = inputs.get("attention_mask")
+
+        def capture_residual(module, layer_inputs, layer_output):
+            del module, layer_inputs
+            state = layer_output[0] if isinstance(layer_output, tuple) else layer_output
+            if pooling == "last-token":
+                vector = state[0, -1]
+            elif pooling == "mean":
+                if mask is None:
+                    vector = state[0].mean(dim=0)
+                else:
+                    weights = mask[0].to(dtype=state.dtype).unsqueeze(-1)
+                    vector = (state[0] * weights).sum(dim=0) / weights.sum().clamp_min(1)
+            else:
+                raise ValueError(f"Unknown residual pooling: {pooling}")
+            # Clone a single vector so last-token pooling does not retain the
+            # full sequence tensor. Transfer all slots to CPU together below.
+            captured.append(vector.detach().clone())
+
+        # A repeated layer module invokes the same hook repeatedly, so hook
+        # order is exactly the custom program's execution-slot order. Capturing
+        # at decoder-block outputs also avoids mixing a final normalized hidden
+        # state with intermediate pre-normalization residuals.
+        handles = [self.model.model.layers[index].register_forward_hook(capture_residual)
+                   for index in sorted(set(path))]
+        try:
+            with torch.no_grad():
+                self.model(**inputs, use_cache=False, output_hidden_states=False,
+                           return_dict=True)
+        finally:
+            for handle in handles:
+                handle.remove()
+        if len(captured) != len(path):
+            raise RuntimeError("Residual stream length does not match execution path")
+        matrix = torch.stack(captured).float().cpu().numpy()
+        return matrix, int(inputs["input_ids"].shape[1])
