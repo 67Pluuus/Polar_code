@@ -1,5 +1,8 @@
 # 第一阶段：生成 PoLar predictor 监督数据
 
+跨难度固定 skip-loop 结构的 train-only 挖掘、held-out 评测和图表见
+[`ROBUST_SKIP_LOOP_分析说明.md`](./ROBUST_SKIP_LOOP_分析说明.md)。
+
 所有命令均在包含 `./Polar_code` 的项目根目录执行，使用远程 Linux 的 Bash。
 本次交付只做静态检查，没有下载或执行模型，没有生成真实搜索结果。
 原仓库文件保持不变；新增代码全部位于 `./Polar_code`，运行产物全部位于 `./Polar_data`。
@@ -11,7 +14,7 @@
 | 示例基础模型，完整未量化权重及 tokenizer/config/generation_config | [meta-llama/Llama-3.2-3B-Instruct](https://huggingface.co/meta-llama/Llama-3.2-3B-Instruct)，需要取得访问权限 | `./Polar_data/models/meta-llama/Llama-3.2-3B-Instruct/` |
 | DART-Math 原始池的全部 5 个 parquet 分片 | [hkust-nlp/dart-math-pool-math](https://huggingface.co/datasets/hkust-nlp/dart-math-pool-math/tree/main/data)，`data/train-00000-of-00005.parquet` 至 `data/train-00004-of-00005.parquet` | `./Polar_data/raw/dart-math-pool-math/data/` |
 | predictor 的冻结 embedding 模型，仅训练 predictor 时需要 | [Qwen/Qwen3-Embedding-0.6B](https://huggingface.co/Qwen/Qwen3-Embedding-0.6B)，完整 Hugging Face 缓存布局，包含 `refs/main` 与对应 snapshot | `./Polar_data/cache/huggingface/hub/models--Qwen--Qwen3-Embedding-0.6B/` |
-| Python 环境 | Linux Python 3.10/3.11，原 `./Polar_code/requirements.txt` 的固定版本，另外需要 PyPI 的 `pyarrow==20.0.0`；统一清单为 `./Polar_code/stage_one/requirements.txt` | 建议环境放在 `./Polar_data/environment/` |
+| Python 环境 | Linux Python 3.10/3.11，原 `./Polar_code/requirements.txt` 的固定版本，另外需要 PyPI 的 `pyarrow==20.0.0` 和 `matplotlib==3.10.5`；统一清单为 `./Polar_code/stage_one/requirements.txt` | 建议环境放在 `./Polar_data/environment/` |
 
 原始池约 965 MB 压缩数据。程序不会联网下载缺失资源。准备时记录实际模型/数据 revision；下方 `local-snapshot`、`local-files` 表示本地快照来源标签，不冒充 Hugging Face commit，程序还会计算实际文件 SHA-256。
 

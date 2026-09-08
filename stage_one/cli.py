@@ -15,11 +15,12 @@ MODELS = ["meta-llama/Llama-3.2-3B-Instruct", "Qwen/Qwen1.5-MoE-A2.7B-Chat",
 def parser():
     result = argparse.ArgumentParser(description="Offline PoLar MCTS supervision stages")
     commands = result.add_subparsers(dest="stage", required=True)
-    for name in ("environment", "prepare", "search", "merge", "validate"):
+    for name in ("environment", "prepare", "search", "merge", "validate",
+                 "mine-programs", "evaluate-programs", "report-programs"):
         sub = commands.add_parser(name)
         sub.add_argument("--run-name", required=True)
         sub.add_argument("--clean", action="store_true", help="Explicitly clear ONLY this stage's run directory")
-        if name != "search":
+        if name not in {"search", "evaluate-programs"}:
             sub.add_argument("--clean-only", action="store_true", help="With --clean, clear this stage then exit")
         if name in {"environment", "prepare"}:
             sub.add_argument("--data-path", required=True)
@@ -47,14 +48,36 @@ def parser():
             sub.add_argument("--max-new-tokens", type=int, required=True)
             sub.add_argument("--temperature", type=float, required=True)
             sub.add_argument("--completion-timeout", type=int, required=True)
+        if name == "mine-programs":
+            sub.add_argument("--max-candidates", type=int, required=True)
+            sub.add_argument("--min-train-support", type=int, required=True)
+            sub.add_argument("--max-consensus-edits", type=int, required=True)
+            sub.add_argument("--top-layers-per-action", type=int, required=True)
+            sub.add_argument("--smoothing", type=float, required=True)
+        if name == "evaluate-programs":
+            sub.add_argument("--model-id", required=True, choices=MODELS)
+            sub.add_argument("--model-path", required=True)
+            sub.add_argument("--model-revision", required=True)
+            sub.add_argument("--seed", type=int, required=True)
+            sub.add_argument("--max-new-tokens", type=int, required=True)
+            sub.add_argument("--temperature", type=float, required=True)
+            sub.add_argument("--evaluation-splits", nargs="+", required=True,
+                             choices=["validation", "test"])
+            sub.add_argument("--max-eval-candidates", type=int, required=True)
+            sub.add_argument("--completion-timeout", type=int, required=True)
+        if name == "report-programs":
+            sub.add_argument("--bootstrap-samples", type=int, required=True)
+            sub.add_argument("--bootstrap-seed", type=int, required=True)
     return result
 
 
 def validate_args(args):
     if not Path("Polar_code/polar/data.py").is_file():
         raise ValueError("Run from the project root containing ./Polar_code and ./Polar_data")
-    stage_dir(args.run_name, {"prepare": "prepared", "merge": "merged",
-                              "validate": "validation"}.get(args.stage, args.stage))
+    stage_map = {"prepare": "prepared", "merge": "merged", "validate": "validation",
+                 "mine-programs": "program_mining", "evaluate-programs": "universal_eval",
+                 "report-programs": "program_report"}
+    stage_dir(args.run_name, stage_map.get(args.stage, args.stage))
     for key in ("data_path", "model_path"):
         if hasattr(args, key):
             relative_path(getattr(args, key))
@@ -72,6 +95,22 @@ def validate_args(args):
             raise ValueError("UCB coefficients and temperature must be finite and nonnegative")
         if not math.isfinite(args.max_length_factor) or args.max_length_factor < 1:
             raise ValueError("Max program length must include the baseline (factor >= 1)")
+    if args.stage == "mine-programs":
+        if min(args.max_candidates, args.min_train_support, args.max_consensus_edits,
+               args.top_layers_per_action) <= 0:
+            raise ValueError("Candidate, support, and consensus-edit limits must be positive")
+        if not math.isfinite(args.smoothing) or args.smoothing <= 0:
+            raise ValueError("Smoothing must be finite and positive")
+    if args.stage == "evaluate-programs":
+        if set(args.evaluation_splits) != {"validation", "test"} or len(args.evaluation_splits) != 2:
+            raise ValueError("Use validation and test exactly once for universal evaluation")
+        args.evaluation_splits = ["validation", "test"]
+        if min(args.max_new_tokens, args.max_eval_candidates, args.completion_timeout) <= 0:
+            raise ValueError("Universal evaluation limits must be positive")
+        if not math.isfinite(args.temperature) or args.temperature < 0:
+            raise ValueError("Evaluation temperature must be finite and nonnegative")
+    if args.stage == "report-programs" and args.bootstrap_samples <= 0:
+        raise ValueError("Bootstrap sample count must be positive")
 
 
 def main():
@@ -79,19 +118,24 @@ def main():
     validate_args(args)
     from .environment import configure_runtime
     configure_runtime(args.run_name)
-    if args.stage == "search":
+    if args.stage in {"search", "evaluate-programs"}:
+        if args.stage == "evaluate-programs":
+            from .universal_eval import distributed_evaluate_programs
+            distributed_evaluate_programs(args)
+            return
         from .distributed_search import distributed_search
         distributed_search(args)
         return
     if int(os.environ.get("WORLD_SIZE", "1")) != 1:
-        raise ValueError("Only search accepts multi-rank torchrun; other stages are single-process")
+        raise ValueError("Only search/evaluate-programs accept multi-rank torchrun")
     with run_lock(args.run_name):
         if args.clean_only:
             if not args.clean:
                 raise ValueError("--clean-only requires explicit --clean")
             from .storage import clean_stage
             clean_stage(args.run_name, {"prepare": "prepared", "merge": "merged",
-                                       "validate": "validation"}.get(args.stage, args.stage))
+                                       "validate": "validation", "mine-programs": "program_mining",
+                                       "report-programs": "program_report"}.get(args.stage, args.stage))
             return
         if args.stage == "environment":
             from .environment import check_environment
@@ -105,3 +149,9 @@ def main():
         elif args.stage == "validate":
             from .validate import validate
             validate(args)
+        elif args.stage == "mine-programs":
+            from .program_analysis import mine_programs
+            mine_programs(args)
+        elif args.stage == "report-programs":
+            from .program_analysis import report_programs
+            report_programs(args)

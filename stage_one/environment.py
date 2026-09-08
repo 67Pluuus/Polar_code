@@ -15,7 +15,10 @@ def check_environment(args):
         clean_stage(args.run_name, "environment")
     recover_pending(folder)
     problems, versions = [], {}
-    requirements = Path("Polar_code/requirements.txt").read_text(encoding="utf-8").splitlines()
+    requirements = []
+    for requirement_file in (Path("Polar_code/requirements.txt"),
+                             Path("Polar_code/stage_one/requirements.txt")):
+        requirements.extend(requirement_file.read_text(encoding="utf-8").splitlines())
     for spec in requirements:
         if "==" not in spec:
             continue
@@ -27,10 +30,6 @@ def check_environment(args):
                 problems.append(f"{name}: expected {expected}, found {actual}")
         except importlib.metadata.PackageNotFoundError:
             problems.append(f"Missing dependency: {spec}")
-    try:
-        versions["pyarrow"] = importlib.metadata.version("pyarrow")
-    except importlib.metadata.PackageNotFoundError:
-        problems.append("Missing pyarrow for local parquet input")
     if platform.system() != "Linux":
         problems.append("Execution stages require Linux (fcntl locks and torchrun)")
     if not problems:
