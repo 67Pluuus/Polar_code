@@ -392,9 +392,11 @@ def report_programs(args):
     if args.clean:
         clean_stage(args.run_name, "program_report")
     recovered = recover_pending(folder)
-    candidates = read_json(stage_dir(args.run_name, "program_mining") / "candidates.json")
-    validate_candidate_payload(candidates)
     eval_config, records = load_universal_evaluation(args.run_name, require_complete=True)
+    candidate_run_name = eval_config.get("candidate_run_name", args.run_name)
+    candidates = read_json(
+        stage_dir(candidate_run_name, "program_mining") / "candidates.json")
+    validate_candidate_payload(candidates)
     candidate_map = {row["candidate_id"]: row for row in candidates["candidates"]}
     split_groups = eval_config["split_difficulty_counts"]
     difficulties = [difficulty for difficulty in eval_config["difficulties"]
@@ -441,6 +443,7 @@ def report_programs(args):
         "test_paired_gain_ci_excludes_zero": intervals["test"][0] > 0,
     }
     result = {"schema_version": 1, "run_name": args.run_name,
+              "candidate_run_name": candidate_run_name,
               "selection_split": "validation", "held_out_report_split": "test",
               "selection_objective": ["validation worst_group_gain", "validation macro_gain",
                                       "validation program_accuracy", "shorter length"],

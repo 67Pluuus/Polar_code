@@ -113,6 +113,14 @@ def prepare(args):
     options = {key: getattr(args, key) for key in (
         "data_path", "data_source", "source_revision", "difficulties", "seed",
         "split_policy", "train_fraction", "validation_fraction", "max_questions_per_diff")}
+    excluded_ids = set()
+    if args.exclude_run_name is not None:
+        excluded_manifest = check_manifest(read_json(
+            stage_dir(args.exclude_run_name, "prepared") / "manifest.json"))
+        excluded_ids = {row["sample_id"] for row in excluded_manifest["samples"]}
+        options["exclude_run_name"] = args.exclude_run_name
+        options["excluded_manifest_id"] = excluded_manifest["manifest_id"]
+        options["excluded_sample_ids_digest"] = digest(sorted(excluded_ids))
     sources = [{"path": str(path), "sha256": file_digest(path), "bytes": path.stat().st_size}
                for path in tqdm(input_files(args.data_path), desc="Fingerprint local data")]
     target = folder / "manifest.json"
@@ -155,7 +163,8 @@ def prepare(args):
 
     samples, split_counts = [], {}
     for diff in args.difficulties:
-        bucket = [r for r in unique.values() if r["difficulty"] == diff]
+        bucket = [r for r in unique.values()
+                  if r["difficulty"] == diff and r["sample_id"] not in excluded_ids]
         # Content-based ordering does not depend on input shard order or Python RNG version.
         bucket.sort(key=lambda r: digest([args.seed, r["sample_id"]]))
         if args.max_questions_per_diff:
@@ -183,6 +192,8 @@ def prepare(args):
     check_manifest(manifest)
     atomic_json(target, manifest)
     atomic_json(folder / "summary.json", {"total_questions": len(samples), "raw_rows": raw_count,
-                                        "split_counts": split_counts, "recovery": recovered})
+                                        "split_counts": split_counts,
+                                        "excluded_source_run_questions": len(excluded_ids),
+                                        "recovery": recovered})
     print(f"Prepared {len(samples)} unique questions at {target}")
     return manifest

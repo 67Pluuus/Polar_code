@@ -36,6 +36,8 @@ def parser():
             sub.add_argument("--train-fraction", type=float, required=True)
             sub.add_argument("--validation-fraction", type=float, required=True)
             sub.add_argument("--max-questions-per-diff", type=int, required=True, help="0 uses all available unique questions")
+            sub.add_argument("--exclude-run-name", default=None,
+                             help="Exclude train questions from a program-discovery run")
         if name == "search":
             sub.add_argument("--model-id", required=True, choices=MODELS)
             sub.add_argument("--model-revision", required=True)
@@ -56,6 +58,8 @@ def parser():
             sub.add_argument("--top-layers-per-action", type=int, required=True)
             sub.add_argument("--smoothing", type=float, required=True)
         if name == "evaluate-programs":
+            sub.add_argument("--candidate-run-name", default=None,
+                             help="Read frozen candidates from another completed MCTS run")
             sub.add_argument("--model-id", required=True, choices=MODELS)
             sub.add_argument("--model-path", required=True)
             sub.add_argument("--model-revision", required=True)
@@ -107,6 +111,8 @@ def validate_args(args):
         if len(set(args.difficulties)) != len(args.difficulties):
             raise ValueError("Duplicate difficulty arguments")
         args.difficulties = sorted(args.difficulties)
+        if args.exclude_run_name is not None:
+            stage_dir(args.exclude_run_name, "prepared")
         if (not 0 < args.train_fraction < 1 or not 0 < args.validation_fraction < 1
                 or args.train_fraction + args.validation_fraction >= 1 or args.max_questions_per_diff < 0):
             raise ValueError("Invalid split fractions or question limit")
@@ -124,6 +130,8 @@ def validate_args(args):
         if not math.isfinite(args.smoothing) or args.smoothing <= 0:
             raise ValueError("Smoothing must be finite and positive")
     if args.stage == "evaluate-programs":
+        if args.candidate_run_name is not None:
+            stage_dir(args.candidate_run_name, "program_mining")
         if set(args.evaluation_splits) != {"validation", "test"} or len(args.evaluation_splits) != 2:
             raise ValueError("Use validation and test exactly once for universal evaluation")
         args.evaluation_splits = ["validation", "test"]

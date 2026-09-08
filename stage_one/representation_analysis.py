@@ -41,7 +41,10 @@ def _atomic_npz(path, arrays):
 
 
 def _selected_programs(run_name, maximum):
-    candidates = read_json(stage_dir(run_name, "program_mining") / "candidates.json")
+    eval_config = read_json(stage_dir(run_name, "universal_eval") / "config.json")
+    candidate_run_name = eval_config.get("candidate_run_name", run_name)
+    candidates = read_json(
+        stage_dir(candidate_run_name, "program_mining") / "candidates.json")
     validate_candidate_payload(candidates)
     report = read_json(stage_dir(run_name, "program_report") / "report.json")
     candidate_map = {row["candidate_id"]: row for row in candidates["candidates"]}
@@ -89,6 +92,9 @@ def _build_capture_config(args, manifest, search_config, programs, rows, world_s
     config = {
         "schema_version": 2,
         "run_name": args.run_name,
+        "candidate_run_name": read_json(
+            stage_dir(args.run_name, "universal_eval") / "config.json").get(
+                "candidate_run_name", args.run_name),
         "world_size": world_size,
         "manifest_id": manifest["manifest_id"],
         "search_config_id": search_config["config_id"],
@@ -268,7 +274,11 @@ def distributed_capture_representations(args):
             try:
                 lock = run_lock(args.run_name)
                 lock.__enter__()
-                manifest, search_config, _ = load_search(args.run_name)
+                from .universal_eval import load_evaluation_inputs
+                eval_config = read_json(
+                    stage_dir(args.run_name, "universal_eval") / "config.json")
+                manifest, search_config, _, _ = load_evaluation_inputs(
+                    args.run_name, eval_config.get("candidate_run_name", args.run_name))
                 _, score_records = load_universal_evaluation(args.run_name)
                 _, programs = _selected_programs(args.run_name, args.max_programs)
                 available = [row for row in manifest["samples"]
@@ -290,7 +300,10 @@ def distributed_capture_representations(args):
         dist.destroy_process_group()
         if not packet[0]["ok"]:
             raise RuntimeError(packet[0]["error"])
-        manifest, _, _ = load_search(args.run_name)
+        from .universal_eval import load_evaluation_inputs
+        eval_config = read_json(stage_dir(args.run_name, "universal_eval") / "config.json")
+        manifest, _, _, _ = load_evaluation_inputs(
+            args.run_name, eval_config.get("candidate_run_name", args.run_name))
         _, score_records = load_universal_evaluation(args.run_name)
         config = read_json(stage_dir(args.run_name, "representations") / "config.json")
         args.model_path = config["model_path"]
@@ -675,7 +688,8 @@ def report_representations(args):
     _write_csv(folder / "program_geometry_by_group.csv", group_rows, group_fields)
     _plot_representation_report(folder, config, projection_records, metric_rows, group_rows)
     trajectories = _plot_search_trajectories(
-        folder, args.run_name, args.max_search_questions, args.max_paths_per_question, args.seed)
+        folder, config.get("candidate_run_name", args.run_name),
+        args.max_search_questions, args.max_paths_per_question, args.seed)
     atomic_text(folder / "summary.md", "\n".join([
         "# MCTS 路径与残差流表征", "",
         f"捕获题目数：{len(metadata)}；mNN 实际使用：{len(sampled)}；k={args.neighbor_k}。",

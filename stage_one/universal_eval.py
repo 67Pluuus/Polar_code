@@ -10,6 +10,7 @@ import uuid
 from tqdm import tqdm
 
 from .model_runner import ModelRunner
+from .prepare import check_manifest
 from .storage import (atomic_json, clean_stage, digest, output_path,
                       read_json, recover_pending, relative_path, run_lock, stage_dir)
 from .validate import load_search
@@ -21,15 +22,35 @@ def _validated_candidates(payload):
     return validate_candidate_payload(payload)
 
 
-def build_config(args, manifest, search_config, candidates, world_size):
+def load_evaluation_inputs(run_name, candidate_run_name=None):
+    candidate_run_name = candidate_run_name or run_name
+    if candidate_run_name == run_name:
+        manifest, search_config, search_records = load_search(run_name)
+    else:
+        manifest = check_manifest(read_json(
+            stage_dir(run_name, "prepared") / "manifest.json"))
+        _, search_config, search_records = load_search(candidate_run_name)
+    candidates = read_json(
+        stage_dir(candidate_run_name, "program_mining") / "candidates.json")
+    return manifest, search_config, search_records, _validated_candidates(candidates)
+
+
+def build_config(args, manifest, search_config, search_records, candidates,
+                 candidate_run_name, world_size):
     _validated_candidates(candidates)
     if candidates["search_config_id"] != search_config["config_id"]:
         raise ValueError("Candidate set belongs to another MCTS search")
-    if (candidates["manifest_id"] != manifest["manifest_id"] or
-            candidates["depth"] != search_config["depth"] or
+    if (candidates["depth"] != search_config["depth"] or
             candidates["max_length"] != search_config["max_length"] or
-            candidates["run_name"] != args.run_name):
-        raise ValueError("Candidate set source manifest, depth, or run does not match")
+            candidates["run_name"] != candidate_run_name):
+        raise ValueError("Candidate set source search, depth, or run does not match")
+    if candidate_run_name == args.run_name and candidates["manifest_id"] != manifest["manifest_id"]:
+        raise ValueError("Candidate set source manifest does not match")
+    evaluated_ids = {row["sample_id"] for row in manifest["samples"]
+                     if row["split"] in args.evaluation_splits}
+    discovery_ids = {row["sample_id"] for row in search_records if row["split"] == "train"}
+    if candidate_run_name != args.run_name and evaluated_ids & discovery_ids:
+        raise ValueError("Frozen-program evaluation overlaps candidate-discovery train questions")
     expected = search_config["args"]
     requested_model_path = relative_path(args.model_path)
     search_model_path = relative_path(expected["model_path"])
@@ -72,6 +93,8 @@ def build_config(args, manifest, search_config, candidates, world_size):
     options["search_model_revision"] = expected["model_revision"]
     config = {
         "schema_version": 1,
+        "run_name": args.run_name,
+        "candidate_run_name": candidate_run_name,
         "args": options,
         "world_size": world_size,
         "depth": search_config["depth"],
@@ -79,6 +102,7 @@ def build_config(args, manifest, search_config, candidates, world_size):
         "split_counts": split_counts,
         "split_difficulty_counts": split_difficulty_counts,
         "manifest_id": manifest["manifest_id"],
+        "candidate_manifest_id": candidates["manifest_id"],
         "search_config_id": search_config["config_id"],
         "candidate_set_id": candidates["candidate_set_id"],
         "search_model_inventory_id": digest(search_config.get("model_files", [])),
@@ -108,7 +132,8 @@ def verify_record(record, row, config, candidate_ids):
         raise ValueError("Mixed universal evaluation configurations")
     if record.get("status") not in {"complete", "failed"}:
         raise ValueError("Unknown universal evaluation status")
-    if record.get("baseline_score") not in (0, 1):
+    if (record.get("baseline_score") not in (0, 1) and
+            not (record.get("status") == "failed" and record.get("baseline_score") is None)):
         raise ValueError("Universal baseline score must be binary")
     scores = record.get("scores")
     if not isinstance(scores, dict) or set(scores) - set(candidate_ids):
@@ -134,6 +159,9 @@ def evaluate_question(row, baseline_score, candidates, runner, config):
     })
     started = time.monotonic()
     try:
+        if baseline_score is None:
+            baseline_score = runner.score(row, list(range(config["depth"])))
+            record["baseline_score"] = baseline_score
         for candidate in tqdm(candidates,
                               desc=f"fixed programs {row['sample_id'][:8]}", leave=False):
             score = runner.score(row, candidate["path"])
@@ -197,7 +225,8 @@ def run_rank(args, rows, search_records, candidates, config, token, rank, local_
                     if sid in completed:
                         continue
                     result, error = evaluate_question(
-                        row, search_by_id[sid]["initial_score"], candidates, runner, config)
+                        row, search_by_id[sid]["initial_score"] if sid in search_by_id else None,
+                        candidates, runner, config)
                     verify_record(result, row, config, candidate_ids)
                     atomic_json(records_dir / f"{sid}.json", result)
                     existing[sid] = result
@@ -259,14 +288,17 @@ def load_universal_evaluation(run_name, require_complete=True):
                if key != "evaluation_config_id"}
     if digest(payload) != config.get("evaluation_config_id"):
         raise ValueError("Universal evaluation configuration checksum mismatch")
-    candidates = read_json(stage_dir(run_name, "program_mining") / "candidates.json")
-    _validated_candidates(candidates)
+    candidate_run_name = config.get("candidate_run_name", run_name)
+    manifest, _, _, candidates = load_evaluation_inputs(run_name, candidate_run_name)
+    if (config.get("run_name", run_name) != run_name or
+            config.get("manifest_id") != manifest["manifest_id"] or
+            config.get("candidate_manifest_id", candidates["manifest_id"]) != candidates["manifest_id"]):
+        raise ValueError("Universal evaluation source manifest changed")
     if candidates["candidate_set_id"] != config["candidate_set_id"]:
         raise ValueError("Universal results use another candidate set")
     candidate_ids = [row["candidate_id"] for row in candidates["candidates"]]
-    _, _, search_records = load_search(run_name)
-    source = {row["sample_id"]: row for row in search_records
-              if row["split"] in config["args"]["evaluation_splits"]}
+    source = {row["sample_id"]: row for row in manifest["samples"]
+               if row["split"] in config["args"]["evaluation_splits"]}
     expected_dirs = {f"rank_{rank:05d}" for rank in range(config["world_size"])}
     actual_dirs = {path.name for path in folder.glob("rank_*") if path.is_dir()}
     if actual_dirs - expected_dirs or (require_complete and actual_dirs != expected_dirs):
@@ -315,10 +347,11 @@ def distributed_evaluate_programs(args):
                 candidate_lock = run_lock(args.run_name)
                 candidate_lock.__enter__()
                 lock = candidate_lock
-                manifest, search_config, _ = load_search(args.run_name)
-                candidates = read_json(
-                    stage_dir(args.run_name, "program_mining") / "candidates.json")
-                config = build_config(args, manifest, search_config, candidates, world)
+                candidate_run_name = args.candidate_run_name or args.run_name
+                manifest, search_config, search_records, candidates = load_evaluation_inputs(
+                    args.run_name, candidate_run_name)
+                config = build_config(args, manifest, search_config, search_records,
+                                      candidates, candidate_run_name, world)
                 folder = stage_dir(args.run_name, "universal_eval")
                 if args.clean:
                     clean_stage(args.run_name, "universal_eval")
@@ -341,12 +374,11 @@ def distributed_evaluate_programs(args):
         dist.destroy_process_group()
         if not packet[0]["ok"]:
             raise RuntimeError(packet[0]["error"])
-        manifest, _, search_records = load_search(args.run_name)
         config = read_json(stage_dir(args.run_name, "universal_eval") / "config.json")
         if config["evaluation_config_id"] != packet[0]["evaluation_config_id"]:
             raise ValueError("Universal configuration changed during startup")
-        candidate_data = read_json(
-            stage_dir(args.run_name, "program_mining") / "candidates.json")
+        manifest, _, search_records, candidate_data = load_evaluation_inputs(
+            args.run_name, config.get("candidate_run_name", args.run_name))
         rows = [row for row in manifest["samples"]
                 if row["split"] in args.evaluation_splits]
         run_rank(args, rows, search_records, candidate_data["candidates"], config,
