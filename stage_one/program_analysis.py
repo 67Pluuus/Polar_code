@@ -554,6 +554,9 @@ def report_programs(args):
         "panel is never used for selection.",
         "- `accuracy_depth_tradeoff`: Validation macro accuracy gain versus executed-depth ratio "
         "for every frozen candidate; the star marks the validation-selected program.",
+        "- `all_candidate_program_layers`: All frozen candidate paths. Rows are ordered using "
+        "validation metrics only; S/K/L mean skip/keep/loop once. The right panel reports "
+        "validation and held-out test accuracy gains, and the star marks the selected program.",
         "- `selected_program_layers`: Exact per-layer action of the selected fixed program. "
         "S/K/L mean skip/keep/loop once.",
         "- `per_difficulty_program_layers`: Per-layer actions for the universal candidate and "
@@ -614,8 +617,70 @@ def plot_program_report(folder, candidates, metrics, selected_id, difficulties,
 
     actions = layer_actions(selected["path"], candidates["depth"])
     mapping = {"skip": 0, "keep": 1, "loop": 2}
-    fig, axis = plt.subplots(figsize=(7.1, 1.05), constrained_layout=True)
     from matplotlib.colors import ListedColormap
+
+    # Keep the selected row first, then rank the remaining candidates using validation only.
+    # Test gains are displayed for held-out reporting and never affect the row order.
+    ranked_candidates = sorted(
+        candidates["candidates"],
+        key=lambda row: (
+            row["candidate_id"] != selected_id,
+            -metrics[row["candidate_id"]]["validation"]["worst_group_gain"],
+            -metrics[row["candidate_id"]]["validation"]["macro_gain"],
+            row["length"],
+            row["candidate_id"],
+        ),
+    )
+    all_actions = [layer_actions(row["path"], candidates["depth"])
+                   for row in ranked_candidates]
+    figure_height = max(3.4, 1.3 + 0.32 * len(ranked_candidates))
+    fig, (path_axis, gain_axis) = plt.subplots(
+        1, 2, figsize=(9.4, figure_height), sharey=True, constrained_layout=True,
+        gridspec_kw={"width_ratios": [4.8, 2.0]},
+    )
+    path_axis.imshow(
+        [[mapping[action] for action in row] for row in all_actions],
+        aspect="auto", cmap=ListedColormap([SKIP_COLOR, KEEP_COLOR, LOOP_COLOR]),
+        vmin=-0.5, vmax=2.5,
+    )
+    row_labels = [
+        f"{'* ' if row['candidate_id'] == selected_id else '  '}{row['candidate_id']}  L={row['length']}"
+        for row in ranked_candidates
+    ]
+    path_axis.set_yticks(range(len(ranked_candidates)), row_labels)
+    path_axis.set_xticks(range(candidates["depth"]), range(candidates["depth"]))
+    path_axis.set_xlabel("Original layer index")
+    path_axis.set_title("Frozen candidate paths")
+    path_axis.tick_params(axis="y", labelsize=7)
+    for tick, row in zip(path_axis.get_yticklabels(), ranked_candidates):
+        if row["candidate_id"] == selected_id:
+            tick.set_fontweight("bold")
+    for row_index, actions_row in enumerate(all_actions):
+        for layer, action in enumerate(actions_row):
+            path_axis.text(
+                layer, row_index, {"skip": "S", "keep": "K", "loop": "L"}[action],
+                ha="center", va="center", fontsize=5.2,
+                color="white" if action != "keep" else "black",
+            )
+
+    y_positions = list(range(len(ranked_candidates)))
+    validation_gains = [metrics[row["candidate_id"]]["validation"]["gain"]
+                        for row in ranked_candidates]
+    test_gains = [metrics[row["candidate_id"]]["test"]["gain"]
+                  for row in ranked_candidates]
+    gain_axis.scatter(validation_gains, y_positions, color=PROGRAM_COLOR, marker="o", s=28,
+                      edgecolor="black", linewidth=0.4, label="Validation")
+    gain_axis.scatter(test_gains, y_positions, color=SKIP_COLOR, marker="s", s=24,
+                      edgecolor="black", linewidth=0.4, label="Test")
+    gain_axis.axvline(0, color="black", linestyle=":", linewidth=0.8)
+    gain_axis.set_xlabel("Accuracy gain vs full depth")
+    gain_axis.set_title("Transfer")
+    gain_axis.tick_params(axis="y", left=False, labelleft=False)
+    gain_axis.legend(frameon=False, loc="best")
+    save_vector(fig, folder / "all_candidate_program_layers")
+    plt.close(fig)
+
+    fig, axis = plt.subplots(figsize=(7.1, 1.05), constrained_layout=True)
     axis.imshow([[mapping[action] for action in actions]], aspect="auto",
                 cmap=ListedColormap([SKIP_COLOR, KEEP_COLOR, LOOP_COLOR]), vmin=-0.5, vmax=2.5)
     axis.set_yticks([0], ["Operation"])

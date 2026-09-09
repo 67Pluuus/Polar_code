@@ -16,7 +16,7 @@ bash ./Polar_code/run_12_paths_five_difficulties.sh --nproc_per_node=1 --cuda-vi
 
 - `./Polar_data/runs/paths12_dm100/prepared/`：抽样清单及五个难度的 `100/50/50` train/validation/test 计数。
 - `./Polar_data/runs/paths12_dm100/universal_eval/`：逐题 baseline 和 12 条路径的真实判分。
-- `./Polar_data/runs/paths12_dm100/program_report/`：validation 选择、test 报告、各难度 accuracy/gain 和 skip-loop 图。
+- `./Polar_data/runs/paths12_dm100/program_report/`：validation 选择、test 报告、各难度 accuracy/gain 和 skip-loop 图。其中 `all_candidate_program_layers.svg`（另有 PDF）把全部 12 条候选路径画在同一张图中：每行一条路径，每列一个原始层，S/K/L 分别表示 skip/keep/loop，右侧是 validation/test 相对完整层基线的 accuracy gain。
 
 第二步输出：
 
@@ -24,4 +24,3 @@ bash ./Polar_code/run_12_paths_five_difficulties.sh --nproc_per_node=1 --cuda-vi
 - `./Polar_data/runs/paths12_dm100/representation_report/`：layer-to-layer mNN、分难度 mNN/CKA、PCA、accuracy-alignment 图和 CSV/JSON。
 
 脚本中的抽样种子 `20260909`、bootstrap 1,000 次、mNN `k=10`、alignment 500 题和 projection 100 题均为本项目可调整值，不是论文作者公开配置。答案生成仍使用来源 MCTS 的 seed 42、50 tokens 和 temperature 0，确保路径评测条件一致。
-
